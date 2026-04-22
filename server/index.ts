@@ -11,10 +11,10 @@ import type { IncomingMessage, ServerResponse } from "http";
 export { prisma } from "./db";
 
 /**
- * Creates a connect-compatible middleware that only handles /api/* requests.
- * Non-API requests fall through to Vite's own middleware (serving index.html, static assets, etc).
+ * Creates and configures the Express app with all routes and middleware.
+ * Used by both the Vite dev server (via createServer) and Netlify Functions (via serverless-http).
  */
-export function createServer() {
+export function createExpressApp() {
   const app = express();
 
   // Middleware
@@ -52,7 +52,7 @@ export function createServer() {
   app.use("/api/messages", messagesRouter);
 
   // 404 handler for unmatched API routes
-  app.all("/api/{*path}", (_req, res) => {
+  app.all("/api/*", (_req, res) => {
     res.status(404).json({ error: "Route not found" });
   });
 
@@ -102,6 +102,16 @@ export function createServer() {
 
   app.use(errorHandler);
 
+  return app;
+}
+
+/**
+ * Creates a connect-compatible middleware that only handles /api/* requests.
+ * Non-API requests fall through to Vite's own middleware (serving index.html, static assets, etc).
+ */
+export function createServer() {
+  const app = createExpressApp();
+
   // Return a connect-compatible middleware that only processes /api requests.
   // Non-API requests are passed through to the next middleware (Vite).
   return (req: IncomingMessage, res: ServerResponse, next: () => void) => {
@@ -112,3 +122,4 @@ export function createServer() {
     }
   };
 }
+
