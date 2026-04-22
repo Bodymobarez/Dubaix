@@ -6,13 +6,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 // User model with authentication and profile info
 model User {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   email             String      @unique
   phone             String?
   password          String      // Hashed with bcrypt
@@ -43,15 +43,18 @@ model User {
   reviews           Review[]    @relation("ReviewAuthor")
   receivedReviews   Review[]    @relation("ReviewSubject")
   savedListings     SavedListing[]
-  conversations     Conversation[]
+  
+  // Participant One in these conversations
+  conversationsAsParticipantOne Conversation[] @relation("ConversationParticipantOne")
+  // Participant Two in these conversations
+  conversationsAsParticipantTwo Conversation[] @relation("ConversationParticipantTwo")
 
-  @@index([email])
   @@index([isVerifiedSeller])
 }
 
 // Category model
 model Category {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   name              String      @unique
   nameAr            String      @unique // Arabic name for RTL support
   description       String?
@@ -64,18 +67,17 @@ model Category {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
-  @@index([slug])
 }
 
 // Listing model - the core of marketplace
 model Listing {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   
   // Basic info
   title             String
-  description       String      @db.Text
+  description       String
   category          Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  categoryId        String
+  categoryId        String      @db.ObjectId
   
   // Pricing
   price             Float
@@ -102,7 +104,7 @@ model Listing {
   
   // Seller info
   seller            User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  sellerId          String
+  sellerId          String      @db.ObjectId
   
   // Relations
   messages          Message[]
@@ -118,29 +120,28 @@ model Listing {
   @@index([sellerId])
   @@index([status])
   @@index([createdAt])
-  @@fulltext([title, description])
 }
 
 // Message model for buyer-seller communication
 model Message {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   
-  content           String      @db.Text
+  content           String
   
   // Participants
   sender            User        @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  senderId          String
+  senderId          String      @db.ObjectId
   
   receiver          User        @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
-  receiverId        String
+  receiverId        String      @db.ObjectId
   
   // Context - message is about a listing
   listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  listingId         String
+  listingId         String      @db.ObjectId
   
   // Conversation
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  conversationId    String
+  conversationId    String      @db.ObjectId
   
   // Message status
   isRead            Boolean     @default(false)
@@ -158,14 +159,14 @@ model Message {
 
 // Conversation model to group messages between two users about listings
 model Conversation {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   
   // Participants
-  participantOne    User        @relation(fields: [participantOneId], references: [id], onDelete: Cascade)
-  participantOneId  String
+  participantOne    User        @relation("ConversationParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
+  participantOneId  String      @db.ObjectId
   
-  participantTwo    User        @relation(fields: [participantTwoId], references: [id], onDelete: Cascade)
-  participantTwoId  String
+  participantTwo    User        @relation("ConversationParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
+  participantTwoId  String      @db.ObjectId
   
   // Messages
   messages          Message[]
@@ -188,21 +189,21 @@ model Conversation {
 
 // Review/Rating model
 model Review {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   
   rating            Int         // 1-5
-  comment           String?     @db.Text
+  comment           String?
   
   // Author and subject
   author            User        @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  authorId          String
+  authorId          String      @db.ObjectId
   
   subject           User        @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
-  subjectId         String
+  subjectId         String      @db.ObjectId
   
   // Related listing
   listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  listingId         String
+  listingId         String      @db.ObjectId
   
   // Timestamps
   createdAt         DateTime    @default(now())
@@ -215,13 +216,13 @@ model Review {
 
 // SavedListing model for bookmarking/wishlisting
 model SavedListing {
-  id                String      @id @default(cuid())
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
   
   user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId            String
+  userId            String      @db.ObjectId
   
   listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  listingId         String
+  listingId         String      @db.ObjectId
   
   createdAt         DateTime    @default(now())
 
