@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { registerSchema } from "@shared/api";
+import { z } from "zod";
 import Header from "@/components/Header";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,13 +18,21 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-type RegisterInput = typeof registerSchema._type;
+const registerFormSchema = registerSchema.extend({
+  confirmPassword: z.string().min(1, "Please confirm your password"),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+type RegisterFormInput = z.infer<typeof registerFormSchema>;
 
 export default function RegisterPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { register: authRegister, isAuthenticated } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -32,8 +41,8 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<RegisterInput>({
-    resolver: zodResolver(registerSchema),
+  } = useForm<RegisterFormInput>({
+    resolver: zodResolver(registerFormSchema),
   });
 
   // Redirect if already logged in
@@ -42,12 +51,13 @@ export default function RegisterPage() {
     return null;
   }
 
-  const onSubmit = async (data: RegisterInput) => {
+  const onSubmit = async (data: RegisterFormInput) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      await authRegister(data);
+      const { confirmPassword: _, ...registerData } = data;
+      await authRegister(registerData);
       setSuccess(true);
 
       // Redirect after short delay
@@ -114,7 +124,7 @@ export default function RegisterPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  First Name
+                  First Name <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -134,7 +144,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Last Name
+                  Last Name <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -155,7 +165,7 @@ export default function RegisterPage() {
 
             {/* Email Field */}
             <div>
-              <label className="block text-sm font-medium mb-2">Email</label>
+              <label className="block text-sm font-medium mb-2">Email <span className="text-destructive">*</span></label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <input
@@ -175,7 +185,7 @@ export default function RegisterPage() {
             {/* Phone Field (Optional) */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                Phone (Optional)
+                Phone <span className="text-muted-foreground text-xs">(Optional)</span>
               </label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -190,7 +200,7 @@ export default function RegisterPage() {
 
             {/* Password Field */}
             <div>
-              <label className="block text-sm font-medium mb-2">Password</label>
+              <label className="block text-sm font-medium mb-2">Password <span className="text-destructive">*</span></label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <input
@@ -219,6 +229,36 @@ export default function RegisterPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 At least 8 characters required
               </p>
+            </div>
+
+            {/* Confirm Password Field */}
+            <div>
+              <label className="block text-sm font-medium mb-2">Confirm Password <span className="text-destructive">*</span></label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  {...register("confirmPassword")}
+                  className="w-full rounded-lg border border-border bg-card pl-10 pr-12 py-3 text-sm placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+              {errors.confirmPassword && (
+                <p className="mt-1 text-xs text-destructive">
+                  {errors.confirmPassword.message}
+                </p>
+              )}
             </div>
 
             {/* Terms Agreement */}
