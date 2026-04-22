@@ -5,7 +5,7 @@ publish = "dist/spa"
 
 
 [functions]
-external_node_modules = ["express", "@prisma/client"]
+external_node_modules = ["@prisma/client"]
 node_bundler = "esbuild"
 [[redirects]]
 force = true
