@@ -52,7 +52,7 @@ export function createExpressApp() {
   app.use("/api/messages", messagesRouter);
 
   // 404 handler for unmatched API routes
-  app.all("/api/*", (_req, res) => {
+  app.all(/^\/api\//, (_req, res) => {
     res.status(404).json({ error: "Route not found" });
   });
 
