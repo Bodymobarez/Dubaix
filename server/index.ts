@@ -8,15 +8,9 @@ import messagesRouter from "./routes/messages";
 import authRouter, { getUserIdFromToken } from "./routes/auth";
 import type { IncomingMessage, ServerResponse } from "http";
 
-// Initialize Prisma Client - will be initialized when dependencies are installed
-let prisma: any = null;
+import { PrismaClient } from "@prisma/client";
 
-try {
-  const { PrismaClient } = require("@prisma/client");
-  prisma = new PrismaClient();
-} catch (e) {
-  console.warn("Prisma Client not installed. Install with: pnpm install @prisma/client");
-}
+const prisma = new PrismaClient();
 
 export { prisma };
 

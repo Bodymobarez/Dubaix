@@ -70,60 +70,7 @@ const CATEGORIES = [
   },
 ];
 
-const FEATURED_LISTINGS = [
-  {
-    id: 1,
-    title: "2023 Toyota Land Cruiser",
-    price: "AED 185,000",
-    location: "Dubai Marina, Dubai",
-    category: "Motors",
-    image:
-      "https://images.unsplash.com/photo-1552820728-8ac41f1ce891?w=400&h=300&fit=crop",
-    verified: true,
-    rating: 4.8,
-    views: 2451,
-    saved: 145,
-  },
-  {
-    id: 2,
-    title: "Luxury Apartment in Downtown",
-    price: "AED 3.2M",
-    location: "Downtown Dubai, Dubai",
-    category: "Property",
-    image:
-      "https://images.unsplash.com/photo-1545457529-d1e8a9a2cc8f?w=400&h=300&fit=crop",
-    verified: true,
-    rating: 4.9,
-    views: 5678,
-    saved: 342,
-  },
-  {
-    id: 3,
-    title: "iPhone 15 Pro Max 256GB",
-    price: "AED 4,299",
-    location: "Al Baraha, Dubai",
-    category: "Electronics",
-    image:
-      "https://images.unsplash.com/photo-1592286927505-1def25115558?w=400&h=300&fit=crop",
-    verified: true,
-    rating: 4.7,
-    views: 8901,
-    saved: 521,
-  },
-  {
-    id: 4,
-    title: "Professional Web Development Services",
-    price: "AED 150 - 500/hour",
-    location: "Abu Dhabi, UAE",
-    category: "Services",
-    image:
-      "https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=300&fit=crop",
-    verified: true,
-    rating: 5.0,
-    views: 3412,
-    saved: 234,
-  },
-];
+
 
 export default function Index() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,12 +85,7 @@ export default function Index() {
       if (!response.ok) throw new Error("Failed to fetch listings");
       return response.json();
     },
-    // Don't retry if API is unavailable (e.g. Prisma not installed)
-    retry: false,
-    // Use mock data as placeholder while API is unavailable
-    placeholderData: {
-      listings: FEATURED_LISTINGS,
-    },
+    retry: 1,
   });
 
   return (
@@ -311,7 +253,7 @@ export default function Index() {
               </div>
             ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {(featuredData?.listings || FEATURED_LISTINGS).map((listing: any) => (
+              {(featuredData?.listings || []).map((listing: any) => (
                 <Link
                   key={listing.id}
                   to={`/listing/${listing.id}`}

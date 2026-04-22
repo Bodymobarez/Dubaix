@@ -1,101 +1,48 @@
 import { Router, RequestHandler } from "express";
 import { registerSchema, loginSchema } from "../../shared/api";
 import crypto from "crypto";
+import { prisma } from "../index";
 
 const router = Router();
-
-// ============================================
-// In-memory user store (works without Prisma/DB)
-// ============================================
-interface StoredUser {
-  id: string;
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  phone?: string;
-  avatar?: string;
-  bio?: string;
-  rating: number;
-  totalReviews: number;
-  isVerifiedSeller: boolean;
-  isAdmin: boolean;
-  createdAt: Date;
-}
 
 // Token -> userId mapping
 const tokenStore = new Map<string, string>();
 
-// Users store (email -> user)
-const usersStore = new Map<string, StoredUser>();
-
-// ============================================
-// SEED: Default admin user
-// ============================================
-const adminUser: StoredUser = {
-  id: "admin_001",
-  email: "admin@dubaix.com",
-  password: "Admin@123",
-  firstName: "Admin",
-  lastName: "Dubaix",
-  avatar: undefined,
-  bio: "Dubaix Marketplace Administrator",
-  rating: 5.0,
-  totalReviews: 0,
-  isVerifiedSeller: true,
-  isAdmin: true,
-  createdAt: new Date(),
-};
-
-usersStore.set(adminUser.email, adminUser);
-console.log("✅ Admin user seeded: admin@dubaix.com / Admin@123");
-
-// ============================================
-// Helpers
-// ============================================
 function generateToken(): string {
   return crypto.randomBytes(48).toString("hex");
 }
 
-function sanitizeUser(user: StoredUser) {
+function sanitizeUser(user: any) {
   // Return user without password
   const { password, ...safeUser } = user;
   return safeUser;
 }
 
-// ============================================
-// POST /api/auth/register
-// ============================================
-export const handleRegister: RequestHandler = (req, res, next) => {
+export const handleRegister: RequestHandler = async (req, res, next) => {
   try {
     const input = registerSchema.parse(req.body);
 
-    // Check if email already exists
-    if (usersStore.has(input.email)) {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: input.email }
+    });
+
+    if (existingUser) {
       return res.status(400).json({
         error: "Email already registered",
         statusCode: 400,
       });
     }
 
-    // Create user
-    const newUser: StoredUser = {
-      id: `user_${crypto.randomBytes(8).toString("hex")}`,
-      email: input.email,
-      password: input.password,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      phone: input.phone,
-      rating: 5.0,
-      totalReviews: 0,
-      isVerifiedSeller: false,
-      isAdmin: false,
-      createdAt: new Date(),
-    };
+    const newUser = await prisma.user.create({
+      data: {
+        email: input.email,
+        password: input.password,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+      }
+    });
 
-    usersStore.set(newUser.email, newUser);
-
-    // Generate token
     const token = generateToken();
     tokenStore.set(token, newUser.id);
 
@@ -108,32 +55,21 @@ export const handleRegister: RequestHandler = (req, res, next) => {
   }
 };
 
-// ============================================
-// POST /api/auth/login
-// ============================================
-export const handleLogin: RequestHandler = (req, res, next) => {
+export const handleLogin: RequestHandler = async (req, res, next) => {
   try {
     const input = loginSchema.parse(req.body);
 
-    // Find user by email
-    const user = usersStore.get(input.email);
+    const user = await prisma.user.findUnique({
+      where: { email: input.email }
+    });
 
-    if (!user) {
+    if (!user || user.password !== input.password) {
       return res.status(401).json({
         error: "Invalid email or password",
         statusCode: 401,
       });
     }
 
-    // Verify password (plain comparison — no bcrypt in dev)
-    if (user.password !== input.password) {
-      return res.status(401).json({
-        error: "Invalid email or password",
-        statusCode: 401,
-      });
-    }
-
-    // Generate token
     const token = generateToken();
     tokenStore.set(token, user.id);
 
@@ -146,49 +82,42 @@ export const handleLogin: RequestHandler = (req, res, next) => {
   }
 };
 
-// ============================================
-// GET /api/auth/me
-// ============================================
-export const handleGetMe: RequestHandler = (req, res) => {
-  const token = (req as any).token;
+export const handleGetMe: RequestHandler = async (req, res, next) => {
+  try {
+    const token = (req as any).token;
 
-  if (!token) {
-    return res.status(401).json({
-      error: "Unauthorized - no token provided",
-      statusCode: 401,
-    });
-  }
-
-  const userId = tokenStore.get(token);
-  if (!userId) {
-    return res.status(401).json({
-      error: "Invalid or expired token",
-      statusCode: 401,
-    });
-  }
-
-  // Find user by ID
-  let foundUser: StoredUser | undefined;
-  for (const user of usersStore.values()) {
-    if (user.id === userId) {
-      foundUser = user;
-      break;
+    if (!token) {
+      return res.status(401).json({
+        error: "Unauthorized - no token provided",
+        statusCode: 401,
+      });
     }
-  }
 
-  if (!foundUser) {
-    return res.status(404).json({
-      error: "User not found",
-      statusCode: 404,
+    const userId = tokenStore.get(token);
+    if (!userId) {
+      return res.status(401).json({
+        error: "Invalid or expired token",
+        statusCode: 401,
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
     });
-  }
 
-  res.json({ user: sanitizeUser(foundUser) });
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        statusCode: 404,
+      });
+    }
+
+    res.json({ user: sanitizeUser(user) });
+  } catch (error) {
+    next(error);
+  }
 };
 
-// ============================================
-// POST /api/auth/logout
-// ============================================
 export const handleLogout: RequestHandler = (req, res) => {
   const token = (req as any).token;
 
@@ -199,20 +128,8 @@ export const handleLogout: RequestHandler = (req, res) => {
   res.json({ message: "Logged out successfully" });
 };
 
-// ============================================
-// Export for use in auth middleware
-// ============================================
 export function getUserIdFromToken(token: string): string | undefined {
   return tokenStore.get(token);
-}
-
-export function getUserById(userId: string): StoredUser | undefined {
-  for (const user of usersStore.values()) {
-    if (user.id === userId) {
-      return user;
-    }
-  }
-  return undefined;
 }
 
 // Register routes

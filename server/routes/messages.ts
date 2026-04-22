@@ -1,41 +1,9 @@
 import { Router, RequestHandler } from "express";
 import { createMessageSchema } from "../../shared/api";
-import { getUserIdFromToken, getUserById } from "./auth";
-import crypto from "crypto";
+import { prisma } from "../index";
 
 const router = Router();
 
-// ============================================
-// In-memory storage
-// ============================================
-interface StoredMessage {
-  id: string;
-  content: string;
-  senderId: string;
-  receiverId: string;
-  listingId: string;
-  conversationId: string;
-  isRead: boolean;
-  createdAt: Date;
-}
-
-interface StoredConversation {
-  id: string;
-  participantOneId: string;
-  participantTwoId: string;
-  lastMessage?: string;
-  lastMessageAt?: Date;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const messagesStore = new Map<string, StoredMessage>();
-const conversationsStore = new Map<string, StoredConversation>();
-
-// ============================================
-// Middleware
-// ============================================
 const authRequired: RequestHandler = (req, res, next) => {
   const userId = (req as any).userId;
   if (!userId) {
@@ -47,127 +15,100 @@ const authRequired: RequestHandler = (req, res, next) => {
   next();
 };
 
-// ============================================
-// Helpers
-// ============================================
-function getUserInfo(userId: string) {
-  const user = getUserById(userId);
-  if (!user) return null;
-  return {
-    id: user.id,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    avatar: user.avatar,
-    isVerifiedSeller: user.isVerifiedSeller,
-  };
-}
+export const handleGetConversations: RequestHandler = async (req, res, next) => {
+  try {
+    const userId = (req as any).userId;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
 
-// ============================================
-// GET /api/messages (conversations list)
-// ============================================
-export const handleGetConversations: RequestHandler = (req, res) => {
-  const userId = (req as any).userId;
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 20;
+    const where = {
+      isActive: true,
+      OR: [
+        { participantOneId: userId },
+        { participantTwoId: userId },
+      ]
+    };
 
-  const userConversations = Array.from(conversationsStore.values())
-    .filter(
-      (c) =>
-        c.isActive &&
-        (c.participantOneId === userId || c.participantTwoId === userId)
-    )
-    .sort(
-      (a, b) =>
-        (b.lastMessageAt?.getTime() || b.createdAt.getTime()) -
-        (a.lastMessageAt?.getTime() || a.createdAt.getTime())
-    );
+    const total = await prisma.conversation.count({ where });
+    const skip = (page - 1) * limit;
 
-  const total = userConversations.length;
-  const start = (page - 1) * limit;
-  const paginated = userConversations.slice(start, start + limit);
-
-  const enriched = paginated.map((c) => ({
-    ...c,
-    participantOne: getUserInfo(c.participantOneId),
-    participantTwo: getUserInfo(c.participantTwoId),
-    messages: Array.from(messagesStore.values())
-      .filter((m) => m.conversationId === c.id)
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
-      .slice(0, 1),
-  }));
-
-  res.json({ conversations: enriched, total, page, limit });
-};
-
-// ============================================
-// GET /api/messages/:conversationId
-// ============================================
-export const handleGetConversationMessages: RequestHandler = (req, res) => {
-  const userId = (req as any).userId;
-  const { conversationId } = req.params;
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 50;
-
-  const conversation = conversationsStore.get(conversationId);
-
-  if (
-    !conversation ||
-    (conversation.participantOneId !== userId &&
-      conversation.participantTwoId !== userId)
-  ) {
-    return res.status(404).json({
-      error: "Conversation not found or access denied",
-      statusCode: 404,
+    const conversations = await prisma.conversation.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { updatedAt: "desc" },
+      include: {
+        participantOne: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+        participantTwo: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
+      }
     });
+
+    res.json({ conversations, total, page, limit });
+  } catch (error) {
+    next(error);
   }
-
-  const conversationMessages = Array.from(messagesStore.values())
-    .filter((m) => m.conversationId === conversationId)
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-
-  // Mark messages as read
-  conversationMessages
-    .filter((m) => m.receiverId === userId && !m.isRead)
-    .forEach((m) => {
-      m.isRead = true;
-      messagesStore.set(m.id, m);
-    });
-
-  const total = conversationMessages.length;
-  const start = (page - 1) * limit;
-  const paginated = conversationMessages.slice(start, start + limit);
-
-  const enriched = paginated.map((m) => ({
-    ...m,
-    sender: getUserInfo(m.senderId),
-    receiver: getUserInfo(m.receiverId),
-  }));
-
-  res.json({
-    conversation,
-    messages: enriched,
-    total,
-    page,
-    limit,
-  });
 };
 
-// ============================================
-// POST /api/messages
-// ============================================
-export const handleSendMessage: RequestHandler = (req, res, next) => {
+export const handleGetConversationMessages: RequestHandler = async (req, res, next) => {
+  try {
+    const userId = (req as any).userId;
+    const { conversationId } = req.params;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 50;
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId }
+    });
+
+    if (!conversation || (conversation.participantOneId !== userId && conversation.participantTwoId !== userId)) {
+      return res.status(404).json({
+        error: "Conversation not found or access denied",
+        statusCode: 404,
+      });
+    }
+
+    // Mark messages as read
+    await prisma.message.updateMany({
+      where: { conversationId, receiverId: userId, isRead: false },
+      data: { isRead: true }
+    });
+
+    const skip = (page - 1) * limit;
+    const total = await prisma.message.count({ where: { conversationId } });
+
+    const messages = await prisma.message.findMany({
+      where: { conversationId },
+      skip,
+      take: limit,
+      orderBy: { createdAt: "asc" },
+      include: {
+        sender: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+        receiver: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+      }
+    });
+
+    res.json({
+      conversation,
+      messages,
+      total,
+      page,
+      limit,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const handleSendMessage: RequestHandler = async (req, res, next) => {
   try {
     const senderId = (req as any).userId;
     const input = createMessageSchema.parse(req.body);
 
-    // Verify receiver exists
-    const receiver = getUserById(input.receiverId);
+    const receiver = await prisma.user.findUnique({ where: { id: input.receiverId } });
     if (!receiver) {
       return res.status(404).json({
         error: "Recipient not found",
@@ -175,114 +116,118 @@ export const handleSendMessage: RequestHandler = (req, res, next) => {
       });
     }
 
-    // Find or create conversation
-    let conversation = Array.from(conversationsStore.values()).find(
-      (c) =>
-        (c.participantOneId === senderId &&
-          c.participantTwoId === input.receiverId) ||
-        (c.participantOneId === input.receiverId &&
-          c.participantTwoId === senderId)
-    );
+    // Find existing conversation
+    let conversation = await prisma.conversation.findFirst({
+      where: {
+        OR: [
+          { participantOneId: senderId, participantTwoId: input.receiverId },
+          { participantOneId: input.receiverId, participantTwoId: senderId },
+        ]
+      }
+    });
 
     if (!conversation) {
-      conversation = {
-        id: `conv_${crypto.randomBytes(8).toString("hex")}`,
-        participantOneId: senderId,
-        participantTwoId: input.receiverId,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      conversationsStore.set(conversation.id, conversation);
+      conversation = await prisma.conversation.create({
+        data: {
+          participantOneId: senderId,
+          participantTwoId: input.receiverId,
+        }
+      });
     }
 
-    // Create message
-    const message: StoredMessage = {
-      id: `msg_${crypto.randomBytes(8).toString("hex")}`,
-      content: input.content,
-      senderId,
-      receiverId: input.receiverId,
-      listingId: input.listingId,
-      conversationId: conversation.id,
-      isRead: false,
-      createdAt: new Date(),
-    };
-
-    messagesStore.set(message.id, message);
-
-    // Update conversation
-    conversation.lastMessage = input.content;
-    conversation.lastMessageAt = new Date();
-    conversation.updatedAt = new Date();
-    conversationsStore.set(conversation.id, conversation);
-
-    res.status(201).json({
-      ...message,
-      sender: getUserInfo(senderId),
-      receiver: getUserInfo(input.receiverId),
+    const message = await prisma.message.create({
+      data: {
+        content: input.content,
+        senderId,
+        receiverId: input.receiverId,
+        listingId: input.listingId,
+        conversationId: conversation.id,
+      },
+      include: {
+        sender: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+        receiver: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } },
+      }
     });
+
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        lastMessage: input.content,
+        lastMessageAt: new Date(),
+        isActive: true, // reactivate if deleted
+      }
+    });
+
+    res.status(201).json(message);
   } catch (error) {
     next(error);
   }
 };
 
-// ============================================
-// PATCH /api/messages/:messageId/read
-// ============================================
-export const handleMarkMessageAsRead: RequestHandler = (req, res) => {
-  const userId = (req as any).userId;
-  const { messageId } = req.params;
-  const message = messagesStore.get(messageId);
+export const handleMarkMessageAsRead: RequestHandler = async (req, res, next) => {
+  try {
+    const userId = (req as any).userId;
+    const { messageId } = req.params;
 
-  if (!message) {
-    return res.status(404).json({
-      error: "Message not found",
-      statusCode: 404,
+    const message = await prisma.message.findUnique({
+      where: { id: messageId }
     });
-  }
 
-  if (message.receiverId !== userId) {
-    return res.status(403).json({
-      error: "You don't have permission to mark this message as read",
-      statusCode: 403,
+    if (!message) {
+      return res.status(404).json({
+        error: "Message not found",
+        statusCode: 404,
+      });
+    }
+
+    if (message.receiverId !== userId) {
+      return res.status(403).json({
+        error: "You don't have permission to mark this message as read",
+        statusCode: 403,
+      });
+    }
+
+    const updated = await prisma.message.update({
+      where: { id: messageId },
+      data: { isRead: true },
+      include: {
+        sender: { select: { id: true, firstName: true, lastName: true, avatar: true, isVerifiedSeller: true } }
+      }
     });
+
+    res.json(updated);
+  } catch (error) {
+    next(error);
   }
-
-  message.isRead = true;
-  messagesStore.set(messageId, message);
-
-  res.json({
-    ...message,
-    sender: getUserInfo(message.senderId),
-  });
 };
 
-// ============================================
-// DELETE /api/messages/:conversationId
-// ============================================
-export const handleDeleteConversation: RequestHandler = (req, res) => {
-  const userId = (req as any).userId;
-  const { conversationId } = req.params;
-  const conversation = conversationsStore.get(conversationId);
+export const handleDeleteConversation: RequestHandler = async (req, res, next) => {
+  try {
+    const userId = (req as any).userId;
+    const { conversationId } = req.params;
 
-  if (
-    !conversation ||
-    (conversation.participantOneId !== userId &&
-      conversation.participantTwoId !== userId)
-  ) {
-    return res.status(404).json({
-      error: "Conversation not found or access denied",
-      statusCode: 404,
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId }
     });
+
+    if (!conversation || (conversation.participantOneId !== userId && conversation.participantTwoId !== userId)) {
+      return res.status(404).json({
+        error: "Conversation not found or access denied",
+        statusCode: 404,
+      });
+    }
+
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isActive: false }
+    });
+
+    res.json({ message: "Conversation deleted" });
+  } catch (error) {
+    next(error);
   }
-
-  conversation.isActive = false;
-  conversationsStore.set(conversationId, conversation);
-
-  res.json({ message: "Conversation deleted" });
 };
 
-// Register routes
 router.get("/", authRequired, handleGetConversations);
 router.get("/:conversationId", authRequired, handleGetConversationMessages);
 router.post("/", authRequired, handleSendMessage);

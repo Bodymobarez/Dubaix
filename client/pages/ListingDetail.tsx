@@ -59,79 +59,7 @@ interface ListingDetailsType {
   }>;
 }
 
-// Mock data - in real app would come from API
-const mockListing: ListingDetailsType = {
-  id: "1",
-  title: "2023 Toyota Land Cruiser - Immaculate Condition",
-  price: "AED 185,000",
-  location: "Dubai Marina, Dubai",
-  category: "Motors",
-  description: `Immaculate 2023 Toyota Land Cruiser with only 15,000 km on the odometer. Fully serviced, all original parts, never been in accident. Comes with full warranty transfer, insurance valid until Dec 2024.
 
-Features:
-• Panoramic sunroof
-• Premium leather interior
-• Advanced safety features
-• Bluetooth connectivity
-• Rear camera and sensors
-• Cruise control
-• Climate control
-
-The vehicle is in perfect condition, regularly maintained at authorized service center. Serious inquiries only. All documents are clear.
-
-Viewing by appointment. Contact for more details.`,
-  images: [
-    "https://images.unsplash.com/photo-1552820728-8ac41f1ce891?w=800&h=600&fit=crop",
-    "https://images.unsplash.com/photo-1519641471654-76ce0107795f?w=800&h=600&fit=crop",
-    "https://images.unsplash.com/photo-1581917694597-4b9ff45b0fb0?w=800&h=600&fit=crop",
-    "https://images.unsplash.com/photo-1594894292054-b51450e91bf2?w=800&h=600&fit=crop",
-  ],
-  postedDate: "2 days ago",
-  views: 2451,
-  
-  seller: {
-    name: "Ahmed Al Mazrouei",
-    rating: 4.8,
-    reviews: 127,
-    verified: true,
-    responseTime: "Within 1 hour",
-    phone: "+971 50 XXX XXXX",
-    joinedDate: "Joined 2 years ago",
-  },
-  
-  specifications: {
-    make: "Toyota",
-    model: "Land Cruiser",
-    year: "2023",
-    mileage: "15,000 km",
-    transmission: "Automatic",
-    fuel: "Petrol",
-  },
-  
-  relatedListings: [
-    {
-      id: "2",
-      title: "2022 Toyota Camry",
-      price: "AED 95,000",
-      image: "https://images.unsplash.com/photo-1517457373614-b7152f800fd1?w=400&h=300&fit=crop",
-      location: "Abu Dhabi",
-    },
-    {
-      id: "3",
-      title: "2023 Honda Accord",
-      price: "AED 120,000",
-      image: "https://images.unsplash.com/photo-1519641471654-76ce0107795f?w=400&h=300&fit=crop",
-      location: "Dubai",
-    },
-    {
-      id: "4",
-      title: "2024 Nissan Patrol",
-      price: "AED 210,000",
-      image: "https://images.unsplash.com/photo-1550355291-bbee04a92027?w=400&h=300&fit=crop",
-      location: "Dubai",
-    },
-  ],
-};
 
 export default function ListingDetail() {
   const { id } = useParams();
@@ -147,23 +75,20 @@ export default function ListingDetail() {
       if (!response.ok) throw new Error("Failed to fetch listing");
       return response.json();
     },
-    // Fallback to mock data if API fails
-    fallbackData: {
-      listing: mockListing,
-      relatedListings: mockListing.relatedListings,
-      seller: mockListing.seller,
-    },
+
   });
 
-  const listing = listingData?.listing || mockListing;
+  const listing = listingData?.listing;
 
   const goToPreviousImage = () => {
+    if (!listing?.images) return;
     setCurrentImageIndex((prev) =>
       prev === 0 ? listing.images.length - 1 : prev - 1
     );
   };
 
   const goToNextImage = () => {
+    if (!listing?.images) return;
     setCurrentImageIndex((prev) =>
       prev === listing.images.length - 1 ? 0 : prev + 1
     );
@@ -180,13 +105,13 @@ export default function ListingDetail() {
     );
   }
 
-  if (error) {
+  if (error || !listing) {
     return (
       <>
         <Header />
         <main className="min-h-screen bg-muted/30 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-destructive mb-4">Failed to load listing</p>
+            <p className="text-destructive mb-4">Failed to load listing or listing not found.</p>
             <Link to="/" className="btn-primary">Back to Home</Link>
           </div>
         </main>
@@ -223,7 +148,7 @@ export default function ListingDetail() {
                 {/* Main Image */}
                 <div className="relative bg-black aspect-video lg:aspect-square">
                   <img
-                    src={listing.images[currentImageIndex]}
+                    src={listing.images?.[currentImageIndex] || "https://via.placeholder.com/800x600"}
                     alt={listing.title}
                     className="w-full h-full object-cover"
                   />
@@ -244,7 +169,7 @@ export default function ListingDetail() {
 
                   {/* Image Counter */}
                   <div className="absolute bottom-4 right-4 bg-background/80 text-foreground px-3 py-1 rounded-full text-sm font-medium backdrop-blur">
-                    {currentImageIndex + 1} / {listing.images.length}
+                    {currentImageIndex + 1} / {listing.images?.length || 1}
                   </div>
 
                   {/* Verified Badge */}
@@ -259,7 +184,7 @@ export default function ListingDetail() {
                 {/* Thumbnail Strip */}
                 <div className="bg-card border-t border-border overflow-x-auto">
                   <div className="flex gap-2 p-4">
-                    {listing.images.map((image, index) => (
+                    {listing.images?.map((image: string, index: number) => (
                       <button
                         key={index}
                         onClick={() => setCurrentImageIndex(index)}
@@ -309,12 +234,12 @@ export default function ListingDetail() {
                 <div className="bg-card border border-border rounded-lg p-6">
                   <h3 className="font-bold text-lg mb-4">Specifications</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {Object.entries(listing.specifications).map(([key, value]) => (
+                    {listing.details && Object.entries(listing.details).map(([key, value]) => (
                       <div key={key}>
                         <p className="text-sm text-muted-foreground capitalize">
                           {key}
                         </p>
-                        <p className="font-semibold">{value}</p>
+                        <p className="font-semibold">{value as string}</p>
                       </div>
                     ))}
                   </div>
@@ -357,9 +282,9 @@ export default function ListingDetail() {
                 {/* Seller Profile */}
                 <div className="space-y-3">
                   <div>
-                    <p className="font-semibold text-lg">{listing.seller.name}</p>
+                    <p className="font-semibold text-lg">{listing.seller?.firstName} {listing.seller?.lastName}</p>
                     <p className="text-sm text-muted-foreground">
-                      {listing.seller.joinedDate}
+                      {listing.seller?.createdAt ? `Joined ${new Date(listing.seller.createdAt).toLocaleDateString()}` : "Active member"}
                     </p>
                   </div>
 
@@ -370,7 +295,7 @@ export default function ListingDetail() {
                         <Star
                           key={i}
                           className={`h-4 w-4 ${
-                            i < Math.floor(listing.seller.rating)
+                            i < Math.floor(listing.seller?.rating || 4)
                               ? "fill-warning text-warning"
                               : "text-muted"
                           }`}
@@ -378,22 +303,22 @@ export default function ListingDetail() {
                       ))}
                     </div>
                     <span className="text-sm font-medium">
-                      {listing.seller.rating} ({listing.seller.reviews} reviews)
+                      {listing.seller?.rating?.toFixed(1) || "4.0"} ({listing.seller?.totalReviews || 0} reviews)
                     </span>
                   </div>
 
                   {/* Verification */}
-                  {listing.seller.verified && (
+                  {listing.seller?.isVerifiedSeller && (
                     <div className="flex items-center gap-2 text-success text-sm">
                       <Shield className="h-4 w-4" />
                       Verified Seller
                     </div>
                   )}
 
-                  {/* Response Time */}
+                  {/* Response Time (mock or default if not tracked in DB) */}
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Clock className="h-4 w-4" />
-                    Responds {listing.seller.responseTime}
+                    Responds within 1 hour
                   </div>
                 </div>
 
@@ -478,7 +403,7 @@ export default function ListingDetail() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {(listingData?.relatedListings || mockListing.relatedListings).map((item: any) => (
+              {(listingData?.relatedListings || []).map((item: any) => (
                 <Link
                   key={item.id}
                   to={`/listing/${item.id}`}

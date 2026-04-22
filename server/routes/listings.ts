@@ -1,36 +1,10 @@
 import { Router, RequestHandler } from "express";
 import { searchFiltersSchema } from "../../shared/api";
-import { listingsStore, type StoredListing } from "./my-listings";
-import { getUserById } from "./auth";
+import { prisma } from "../index";
 
 const router = Router();
 
-// Helper to enrich listing with seller info
-function enrichListing(listing: StoredListing) {
-  const seller = getUserById(listing.sellerId);
-  return {
-    ...listing,
-    price: `AED ${listing.price.toLocaleString()}`,
-    seller: seller
-      ? {
-          id: seller.id,
-          email: seller.email,
-          firstName: seller.firstName,
-          lastName: seller.lastName,
-          avatar: seller.avatar,
-          rating: seller.rating,
-          totalReviews: seller.totalReviews,
-          isVerifiedSeller: seller.isVerifiedSeller,
-        }
-      : undefined,
-  };
-}
-
-/**
- * GET /api/listings
- * Fetch listings with advanced filtering and search
- */
-export const handleGetListings: RequestHandler = (req, res, next) => {
+export const handleGetListings: RequestHandler = async (req, res, next) => {
   try {
     const filters = searchFiltersSchema.parse({
       search: req.query.search as string | undefined,
@@ -43,61 +17,51 @@ export const handleGetListings: RequestHandler = (req, res, next) => {
       limit: req.query.limit ? Number(req.query.limit) : 20,
     });
 
-    let results = Array.from(listingsStore.values()).filter(
-      (l) => l.status === "active"
-    );
+    const where: any = { status: "active" };
 
-    // Search filter
     if (filters.search) {
-      const q = filters.search.toLowerCase();
-      results = results.filter(
-        (l) =>
-          l.title.toLowerCase().includes(q) ||
-          l.description.toLowerCase().includes(q)
-      );
+      where.OR = [
+        { title: { contains: filters.search, mode: "insensitive" } },
+        { description: { contains: filters.search, mode: "insensitive" } },
+      ];
     }
 
-    // Category filter
     if (filters.categoryId) {
-      results = results.filter((l) => l.categoryId === filters.categoryId);
+      where.categoryId = filters.categoryId;
     }
 
-    // Price range filter
-    if (filters.minPrice) {
-      results = results.filter((l) => l.price >= filters.minPrice!);
-    }
-    if (filters.maxPrice) {
-      results = results.filter((l) => l.price <= filters.maxPrice!);
+    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+      where.price = {};
+      if (filters.minPrice !== undefined) where.price.gte = filters.minPrice;
+      if (filters.maxPrice !== undefined) where.price.lte = filters.maxPrice;
     }
 
-    // Location filter
     if (filters.location) {
-      const loc = filters.location.toLowerCase();
-      results = results.filter((l) =>
-        l.location.toLowerCase().includes(loc)
-      );
+      where.location = { contains: filters.location, mode: "insensitive" };
     }
 
-    // Sort
-    if (filters.sortBy === "price_low") {
-      results.sort((a, b) => a.price - b.price);
-    } else if (filters.sortBy === "price_high") {
-      results.sort((a, b) => b.price - a.price);
-    } else if (filters.sortBy === "most_viewed") {
-      results.sort((a, b) => b.views - a.views);
-    } else {
-      results.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-    }
+    let orderBy: any = { createdAt: "desc" };
+    if (filters.sortBy === "price_low") orderBy = { price: "asc" };
+    else if (filters.sortBy === "price_high") orderBy = { price: "desc" };
+    else if (filters.sortBy === "most_viewed") orderBy = { views: "desc" };
 
-    const total = results.length;
     const start = (filters.page - 1) * filters.limit;
-    const paginated = results.slice(start, start + filters.limit);
+
+    const total = await prisma.listing.count({ where });
+    const listings = await prisma.listing.findMany({
+      where,
+      skip: start,
+      take: filters.limit,
+      orderBy,
+      include: {
+        seller: {
+          select: { id: true, email: true, firstName: true, lastName: true, avatar: true, rating: true, totalReviews: true, isVerifiedSeller: true }
+        }
+      }
+    });
 
     res.json({
-      listings: paginated.map(enrichListing),
+      listings: listings.map(l => ({...l, price: `AED ${l.price.toLocaleString()}`})),
       total,
       page: filters.page,
       limit: filters.limit,
@@ -107,103 +71,111 @@ export const handleGetListings: RequestHandler = (req, res, next) => {
   }
 };
 
-/**
- * GET /api/listings/:id
- * Fetch single listing with seller info
- */
-export const handleGetListingDetail: RequestHandler = (req, res) => {
-  const { id } = req.params;
-  const listing = listingsStore.get(id);
+export const handleGetListingDetail: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = req.params;
 
-  if (!listing) {
-    return res.status(404).json({
-      error: "Listing not found",
-      statusCode: 404,
-    });
-  }
-
-  // Increment view count
-  listing.views += 1;
-  listingsStore.set(id, listing);
-
-  // Fetch related listings from same category
-  const relatedListings = Array.from(listingsStore.values())
-    .filter(
-      (l) =>
-        l.categoryId === listing.categoryId &&
-        l.id !== id &&
-        l.status === "active"
-    )
-    .slice(0, 4)
-    .map(enrichListing);
-
-  const seller = getUserById(listing.sellerId);
-
-  res.json({
-    listing: enrichListing(listing),
-    relatedListings,
-    seller: seller
-      ? {
-          id: seller.id,
-          email: seller.email,
-          firstName: seller.firstName,
-          lastName: seller.lastName,
-          avatar: seller.avatar,
-          bio: seller.bio,
-          rating: seller.rating,
-          totalReviews: seller.totalReviews,
-          isVerifiedSeller: seller.isVerifiedSeller,
-          createdAt: seller.createdAt,
+    const listing = await prisma.listing.findUnique({
+      where: { id },
+      include: {
+        seller: {
+          select: { id: true, email: true, firstName: true, lastName: true, avatar: true, bio: true, rating: true, totalReviews: true, isVerifiedSeller: true, createdAt: true }
         }
-      : null,
-  });
+      }
+    });
+
+    if (!listing) {
+      return res.status(404).json({
+        error: "Listing not found",
+        statusCode: 404,
+      });
+    }
+
+    // Increment view count
+    await prisma.listing.update({
+      where: { id },
+      data: { views: { increment: 1 } }
+    });
+
+    const relatedListingsRaw = await prisma.listing.findMany({
+      where: {
+        categoryId: listing.categoryId,
+        id: { not: id },
+        status: "active",
+      },
+      take: 4,
+      include: {
+        seller: {
+          select: { id: true, email: true, firstName: true, lastName: true, avatar: true, rating: true, totalReviews: true, isVerifiedSeller: true }
+        }
+      }
+    });
+
+    const enrichedListing = { ...listing, price: `AED ${listing.price.toLocaleString()}` };
+    const relatedListings = relatedListingsRaw.map(l => ({ ...l, price: `AED ${l.price.toLocaleString()}` }));
+
+    res.json({
+      listing: enrichedListing,
+      relatedListings,
+      seller: listing.seller,
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
-/**
- * GET /api/listings/category/:categoryId
- * Fetch listings by category
- */
-export const handleGetListingsByCategory: RequestHandler = (req, res) => {
-  const { categoryId } = req.params;
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 20;
+export const handleGetListingsByCategory: RequestHandler = async (req, res, next) => {
+  try {
+    const { categoryId } = req.params;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
 
-  const results = Array.from(listingsStore.values())
-    .filter((l) => l.categoryId === categoryId && l.status === "active")
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    const where = { categoryId, status: "active" };
+    const total = await prisma.listing.count({ where });
+    const start = (page - 1) * limit;
 
-  const total = results.length;
-  const start = (page - 1) * limit;
+    const listings = await prisma.listing.findMany({
+      where,
+      skip: start,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        seller: {
+          select: { id: true, email: true, firstName: true, lastName: true, avatar: true, rating: true, totalReviews: true, isVerifiedSeller: true }
+        }
+      }
+    });
 
-  res.json({
-    listings: results.slice(start, start + limit).map(enrichListing),
-    total,
-    page,
-    limit,
-  });
+    res.json({
+      listings: listings.map(l => ({...l, price: `AED ${l.price.toLocaleString()}`})),
+      total,
+      page,
+      limit,
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
-/**
- * GET /api/listings/featured
- * Fetch featured listings
- */
-export const handleGetFeaturedListings: RequestHandler = (_req, res) => {
-  const featured = Array.from(listingsStore.values())
-    .filter((l) => l.featured && l.status === "active")
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
-    .slice(0, 8)
-    .map(enrichListing);
+export const handleGetFeaturedListings: RequestHandler = async (_req, res, next) => {
+  try {
+    const listings = await prisma.listing.findMany({
+      where: { featured: true, status: "active" },
+      take: 8,
+      orderBy: { createdAt: "desc" },
+      include: {
+        seller: {
+          select: { id: true, email: true, firstName: true, lastName: true, avatar: true, rating: true, totalReviews: true, isVerifiedSeller: true }
+        }
+      }
+    });
 
-  res.json({ listings: featured });
+    res.json({ listings: listings.map(l => ({...l, price: `AED ${l.price.toLocaleString()}`})) });
+  } catch (error) {
+    next(error);
+  }
 };
 
-// Register routes
 router.get("/", handleGetListings);
 router.get("/featured", handleGetFeaturedListings);
 router.get("/category/:categoryId", handleGetListingsByCategory);
