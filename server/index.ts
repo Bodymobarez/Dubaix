@@ -8,11 +8,7 @@ import messagesRouter from "./routes/messages";
 import authRouter, { getUserIdFromToken } from "./routes/auth";
 import type { IncomingMessage, ServerResponse } from "http";
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
-
-export { prisma };
+export { prisma } from "./db";
 
 /**
  * Creates a connect-compatible middleware that only handles /api/* requests.
