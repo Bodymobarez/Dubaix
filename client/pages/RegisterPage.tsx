@@ -57,7 +57,7 @@ export default function RegisterPage() {
 
     try {
       const { confirmPassword: _, ...registerData } = data;
-      await authRegister(registerData);
+      await authRegister(registerData as any);
       setSuccess(true);
 
       // Redirect after short delay
