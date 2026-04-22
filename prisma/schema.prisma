@@ -1,0 +1,231 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model with authentication and profile info
+model User {
+  id                String      @id @default(cuid())
+  email             String      @unique
+  phone             String?
+  password          String      // Hashed with bcrypt
+  
+  // Profile
+  firstName         String
+  lastName          String
+  avatar            String?     // URL to avatar image
+  bio               String?
+  
+  // Account status
+  emailVerified     Boolean     @default(false)
+  phoneVerified     Boolean     @default(false)
+  isVerifiedSeller  Boolean     @default(false)
+  
+  // Ratings and reviews
+  rating            Float       @default(5.0)
+  totalReviews      Int         @default(0)
+  
+  // Account info
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relations
+  listings          Listing[]
+  sentMessages      Message[]   @relation("SentMessages")
+  receivedMessages  Message[]   @relation("ReceivedMessages")
+  reviews           Review[]    @relation("ReviewAuthor")
+  receivedReviews   Review[]    @relation("ReviewSubject")
+  savedListings     SavedListing[]
+  conversations     Conversation[]
+
+  @@index([email])
+  @@index([isVerifiedSeller])
+}
+
+// Category model
+model Category {
+  id                String      @id @default(cuid())
+  name              String      @unique
+  nameAr            String      @unique // Arabic name for RTL support
+  description       String?
+  descriptionAr     String?
+  icon              String?     // Icon name from lucide-react
+  slug              String      @unique
+  
+  listings          Listing[]
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([slug])
+}
+
+// Listing model - the core of marketplace
+model Listing {
+  id                String      @id @default(cuid())
+  
+  // Basic info
+  title             String
+  description       String      @db.Text
+  category          Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId        String
+  
+  // Pricing
+  price             Float
+  currency          String      @default("AED")
+  
+  // Location
+  location          String
+  latitude          Float?
+  longitude         Float?
+  
+  // Details (flexible for different categories)
+  details           Json        @default("{}")  // Stores category-specific fields like make, model, year for cars
+  
+  // Media
+  images            String[]    @default([])    // Array of image URLs
+  
+  // Status
+  status            String      @default("active") // active, sold, removed, expired
+  featured          Boolean     @default(false)
+  boosted           Boolean     @default(false)
+  
+  // Stats
+  views             Int         @default(0)
+  
+  // Seller info
+  seller            User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  sellerId          String
+  
+  // Relations
+  messages          Message[]
+  reviews           Review[]
+  savedBy           SavedListing[]
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  expiresAt         DateTime?
+
+  @@index([categoryId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
+  @@fulltext([title, description])
+}
+
+// Message model for buyer-seller communication
+model Message {
+  id                String      @id @default(cuid())
+  
+  content           String      @db.Text
+  
+  // Participants
+  sender            User        @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId          String
+  
+  receiver          User        @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiverId        String
+  
+  // Context - message is about a listing
+  listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId         String
+  
+  // Conversation
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId    String
+  
+  // Message status
+  isRead            Boolean     @default(false)
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([listingId])
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+// Conversation model to group messages between two users about listings
+model Conversation {
+  id                String      @id @default(cuid())
+  
+  // Participants
+  participantOne    User        @relation(fields: [participantOneId], references: [id], onDelete: Cascade)
+  participantOneId  String
+  
+  participantTwo    User        @relation(fields: [participantTwoId], references: [id], onDelete: Cascade)
+  participantTwoId  String
+  
+  // Messages
+  messages          Message[]
+  
+  // Last message for quick preview
+  lastMessage       String?
+  lastMessageAt     DateTime?
+  
+  // Status
+  isActive          Boolean     @default(true)
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([participantOneId, participantTwoId])
+  @@index([participantOneId])
+  @@index([participantTwoId])
+  @@index([updatedAt])
+}
+
+// Review/Rating model
+model Review {
+  id                String      @id @default(cuid())
+  
+  rating            Int         // 1-5
+  comment           String?     @db.Text
+  
+  // Author and subject
+  author            User        @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  authorId          String
+  
+  subject           User        @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectId         String
+  
+  // Related listing
+  listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId         String
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([authorId, subjectId, listingId])
+  @@index([subjectId])
+  @@index([listingId])
+}
+
+// SavedListing model for bookmarking/wishlisting
+model SavedListing {
+  id                String      @id @default(cuid())
+  
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  
+  listing           Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId         String
+  
+  createdAt         DateTime    @default(now())
+
+  @@unique([userId, listingId])
+  @@index([userId])
+  @@index([listingId])
+}
