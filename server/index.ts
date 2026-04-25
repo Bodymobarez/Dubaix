@@ -19,8 +19,38 @@ export function createExpressApp() {
 
   // Middleware
   app.use(cors());
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Diagnostic and Body Fix middleware for serverless
+  app.use((req, res, next) => {
+    // If the body is a string (sometimes happens in serverless)
+    if (req.body && typeof req.body === 'string') {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch (e) {}
+    }
+
+    // Fallback for missing body in some serverless environments
+    if (req.method === 'POST' && (!req.body || (typeof req.body === 'object' && Object.keys(req.body).length === 0))) {
+      // Access serverless-http/Netlify specific properties if they exist
+      const rawBody = (req as any).rawBody || (req as any).apiGateway?.event?.body;
+      if (rawBody) {
+        try {
+          const bodyStr = (req as any).apiGateway?.event?.isBase64Encoded 
+            ? Buffer.from(rawBody, 'base64').toString() 
+            : rawBody;
+          req.body = JSON.parse(bodyStr);
+        } catch (e) {}
+      }
+    }
+
+    if (process.env.NODE_ENV === 'production' && req.method === 'POST') {
+      console.log(`[DEBUG] Request ${req.method} ${req.url}`);
+      console.log(`[DEBUG] Body parsed: ${typeof req.body === 'object' && Object.keys(req.body).length > 0}`);
+    }
+    next();
+  });
 
   // Auth middleware — extract token and resolve userId
   app.use((req, res, next) => {
@@ -78,10 +108,16 @@ export function createExpressApp() {
 
     // Zod validation error
     if (err.name === "ZodError") {
+      console.error("Zod Validation Error:", JSON.stringify(err.errors));
       return res.status(400).json({
         error: "Validation error",
         statusCode: 400,
         details: err.errors,
+        _debug: {
+          receivedBody: req.body,
+          bodyType: typeof req.body,
+          headers: req.headers,
+        }
       });
     }
 
